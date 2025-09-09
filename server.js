@@ -39,6 +39,11 @@ function writeData(obj) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(obj, null, 2));
 }
 
+// ✅ Health check route
+app.get('/', (req, res) => {
+  res.send('🚀 API is running at api.payonerupee.online');
+});
+
 /**
  * Create order (called by frontend)
  */
@@ -59,9 +64,7 @@ app.post('/create-order', async (req, res) => {
 });
 
 /**
- * Verify payment (called by frontend when Razorpay checkout returns)
- * Expects:
- * { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+ * Verify payment
  */
 app.post('/verify', (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
@@ -88,7 +91,7 @@ app.post('/verify', (req, res) => {
 });
 
 /**
- * Protected route to read the counter (only if user has token)
+ * Protected route to read the counter
  */
 app.get('/count', (req, res) => {
   const auth = req.headers.authorization || '';
