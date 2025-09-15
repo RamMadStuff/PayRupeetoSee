@@ -5,7 +5,6 @@ const cors = require('cors');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const fs = require('fs');
 const { Pool } = require('pg');  // PostgreSQL client
 
 const PORT = process.env.PORT || 4000;
@@ -17,9 +16,10 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // needed for Render/Supabase
+  ssl: { rejectUnauthorized: false }, // Required for Render/Heroku
 });
 
+// ✅ Initialize DB with counter table
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS counter (
@@ -28,9 +28,8 @@ async function initDB() {
     );
   `);
 
-// Ensure a row exists
-
-const result = await pool.query("SELECT * FROM counter LIMIT 1");
+  // Ensure at least one row exists
+  const result = await pool.query("SELECT * FROM counter LIMIT 1");
   if (result.rows.length === 0) {
     await pool.query("INSERT INTO counter (count) VALUES (0)");
   }
@@ -46,23 +45,9 @@ const razorpay = new Razorpay({
   key_secret: RAZORPAY_KEY_SECRET,
 });
 
-const DATA_FILE = './data.json';
-function readData() {
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  } catch (err) {
-    const init = { count: 0 };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(init, null, 2));
-    return init;
-  }
-}
-function writeData(obj) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(obj, null, 2));
-}
-
 // ✅ Health check route
 app.get('/', (req, res) => {
-  res.send('🚀 API is running at api.payonerupee.online');
+  res.send('🚀 API is running with PostgreSQL at api.payonerupee.online');
 });
 
 /**
@@ -87,7 +72,7 @@ app.post('/create-order', async (req, res) => {
 /**
  * Verify payment
  */
-app.post('/verify', (req, res) => {
+app.post('/verify', async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return res.status(400).json({ success: false, message: 'Missing fields' });
@@ -100,12 +85,20 @@ app.post('/verify', (req, res) => {
     .digest('hex');
 
   if (expectedSignature === razorpay_signature) {
-    const data = readData();
-    data.count = (data.count || 0) + 1;
-    writeData(data);
+    try {
+      // increment counter in DB
+      await pool.query(`UPDATE counter SET count = count + 1 WHERE id = 1`);
+      const result = await pool.query(`SELECT count FROM counter WHERE id = 1`);
+      const currentCount = result.rows[0].count;
 
-    const token = jwt.sign({ paid: true, ts: Date.now() }, JWT_SECRET, { expiresIn: '7d' });
-    return res.json({ success: true, token, count: data.count });
+      // generate JWT
+      const token = jwt.sign({ paid: true, ts: Date.now() }, JWT_SECRET, { expiresIn: '7d' });
+
+      return res.json({ success: true, token, count: currentCount });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ success: false, message: 'DB error' });
+    }
   } else {
     return res.status(400).json({ success: false, message: 'Invalid signature' });
   }
@@ -114,15 +107,19 @@ app.post('/verify', (req, res) => {
 /**
  * Protected route to read the counter
  */
-app.get('/count', (req, res) => {
+app.get('/count', async (req, res) => {
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ')) return res.status(403).json({ message: 'Unauthorized' });
 
   const token = auth.split(' ')[1];
   try {
     jwt.verify(token, JWT_SECRET);
-    const data = readData();
-    return res.json({ count: data.count });
+
+    // fetch count from DB
+    const result = await pool.query(`SELECT count FROM counter WHERE id = 1`);
+    const currentCount = result.rows[0].count;
+
+    return res.json({ count: currentCount });
   } catch (err) {
     return res.status(403).json({ message: 'Unauthorized' });
   }
