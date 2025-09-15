@@ -6,15 +6,36 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
+const { Pool } = require('pg');  // PostgreSQL client
 
 const PORT = process.env.PORT || 4000;
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
-if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
-  console.warn('⚠️ Razorpay keys are not set in .env');
+const DATABASE_URL = process.env.DATABASE_URL;
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // needed for Render/Supabase
+});
+
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS counter (
+      id SERIAL PRIMARY KEY,
+      count INTEGER DEFAULT 0
+    );
+  `);
+
+// Ensure a row exists
+
+const result = await pool.query("SELECT * FROM counter LIMIT 1");
+  if (result.rows.length === 0) {
+    await pool.query("INSERT INTO counter (count) VALUES (0)");
+  }
 }
+initDB();
 
 const app = express();
 app.use(cors());
